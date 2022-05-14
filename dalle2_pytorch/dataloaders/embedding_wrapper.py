@@ -13,7 +13,7 @@ class PriorEmbeddingLoader(IterableDataset):
         stop: int,
         image_reader,
         text_reader: EmbeddingReader = None,
-        device:str='cpu',
+        device: str = "cpu",
     ) -> None:
         super(PriorEmbeddingLoader).__init__()
 
@@ -93,7 +93,7 @@ def make_splits(
     train_set_size = int(train_split * num_data_points)
     eval_set_size = int(eval_split * num_data_points)
     eval_stop = train_set_size + eval_set_size
-    
+
     if text_conditioned:
         assert meta_url is not None, "Must supply metadata url if text-conditioning"
         image_reader = EmbeddingReader(
@@ -109,7 +109,7 @@ def make_splits(
             batch_size=batch_size,
             start=0,
             stop=train_set_size,
-            device=device
+            device=device,
         )
         eval_loader = PriorEmbeddingLoader(
             text_conditioned=text_conditioned,
@@ -117,7 +117,7 @@ def make_splits(
             batch_size=batch_size,
             start=train_set_size,
             stop=eval_stop,
-            device=device
+            device=device,
         )
         test_loader = PriorEmbeddingLoader(
             text_conditioned=text_conditioned,
@@ -125,7 +125,7 @@ def make_splits(
             batch_size=batch_size,
             start=eval_stop,
             stop=num_data_points,
-            device=device
+            device=device,
         )
 
     else:
@@ -143,7 +143,7 @@ def make_splits(
             batch_size=batch_size,
             start=0,
             stop=train_set_size,
-            device=device
+            device=device,
         )
         eval_loader = PriorEmbeddingLoader(
             text_conditioned=text_conditioned,
@@ -152,7 +152,7 @@ def make_splits(
             batch_size=batch_size,
             start=train_set_size,
             stop=eval_stop,
-            device=device
+            device=device,
         )
         test_loader = PriorEmbeddingLoader(
             text_conditioned=text_conditioned,
@@ -161,7 +161,8 @@ def make_splits(
             batch_size=batch_size,
             start=eval_stop,
             stop=num_data_points,
-            device=device
-            )
+            device=device,
+        )
 
     return train_loader, eval_loader, test_loader
+ß
