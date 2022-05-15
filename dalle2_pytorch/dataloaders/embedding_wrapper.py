@@ -89,7 +89,6 @@ def make_splits(
 
     assert img_url is not None, "Must supply some image embeddings"
 
-
     if text_conditioned:
         assert meta_url is not None, "Must supply metadata url if text-conditioning"
         image_reader = EmbeddingReader(
@@ -143,7 +142,7 @@ def make_splits(
 
         # compute split points
         if num_data_points > image_reader.count:
-            print("Specified counts is largere than number of point...defaulting to max length of reader.")
+            print("Specified point count is larger than the number of points available...defaulting to max length of reader.")
             num_data_points = image_reader.count
 
         train_set_size = int(train_split * num_data_points)

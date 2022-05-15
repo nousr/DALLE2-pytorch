@@ -20,6 +20,8 @@ os.environ["WANDB_SILENT"] = "true"
 NUM_TEST_EMBEDDINGS = 100 # for cosine similarity reporting during training
 REPORT_METRICS_EVERY = 100 # for cosine similarity and other metric reporting during training
 
+def caption_to_tokens(captions):
+    return clip.tokenize(captions['caption'].to_list(), truncate=True)
 
 def eval_model(model, dataloader, text_conditioned, loss_type, phase="Validation"):
     model.eval()
@@ -290,7 +292,7 @@ def main():
     parser.add_argument("--dpn-dim-head", type=int, default=64)
     parser.add_argument("--dpn-heads", type=int, default=12)
     # DiffusionPrior(dp) parameters
-    parser.add_argument("--dp-condition-on-text-encodings", type=bool, default=False)
+    parser.add_argument("--dp-condition-on-text-encodings", type=bool, default=True)
     parser.add_argument("--dp-timesteps", type=int, default=1000)
     parser.add_argument("--dp-normformer", type=bool, default=True)
     parser.add_argument("--dp-cond-drop-prob", type=float, default=0.1)
