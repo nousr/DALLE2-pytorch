@@ -6,12 +6,13 @@ import argparse
 import numpy as np
 
 import torch
+import clip
 from torch import nn
 from dalle2_pytorch.dataloaders import make_splits
 from dalle2_pytorch import DiffusionPrior, DiffusionPriorNetwork, OpenAIClipAdapter
 from dalle2_pytorch.train import load_diffusion_model, save_diffusion_model, print_ribbon
 from dalle2_pytorch.optimizer import get_optimizer
-from torch.cuda.amp import autocast,GradScaler
+from torch.cuda.amp import autocast, GradScaler
 
 import time
 from tqdm import tqdm
@@ -21,9 +22,12 @@ os.environ["WANDB_SILENT"] = "true"
 NUM_TEST_EMBEDDINGS = 100 # for cosine similarity reporting during training
 REPORT_METRICS_EVERY = 100 # for cosine similarity and other metric reporting during training
 
+def caption_to_tokens(captions):
+    return clip.tokenize(captions['caption'].to_list(), truncate=True)
 
 def tokens_to_embedding(tokenized_text, diffusion_prior):
     return diffusion_prior.clip.embed_text(tokenized_text)[0]
+
 
 def eval_model(model, text_conditioned, dataloader, loss_type, phase="Validation"):
     model.eval()
@@ -31,6 +35,7 @@ def eval_model(model, text_conditioned, dataloader, loss_type, phase="Validation
     with torch.no_grad():
         total_loss = 0.
         total_samples = 0.
+
 
         for image_embeddings, text_data in dataloader:
 
@@ -49,7 +54,7 @@ def eval_model(model, text_conditioned, dataloader, loss_type, phase="Validation
 
         avg_loss = (total_loss / total_samples)
         wandb.log({f'{phase} {loss_type}': avg_loss})
-
+        
 
 def report_cosine_sims(diffusion_prior, dataloader, text_conditioned, device):
     diffusion_prior.eval()
@@ -268,14 +273,14 @@ def main():
     # URLs for embeddings 
     parser.add_argument("--image-embed-url", type=str, default="https://mystic.the-eye.eu/public/AI/cah/laion5b/embeddings/laion2B-en/img_emb/")
     parser.add_argument("--text-embed-url", type=str, default="https://mystic.the-eye.eu/public/AI/cah/laion5b/embeddings/laion2B-en/text_emb/")
-    parser.add_argument("--meta-url", type=str, default="https://mystic.the-eye.eu/public/AI/cah/laion5b/embeddings/laion2B-en/text_emb/")
+    parser.add_argument("--meta-url", type=str, default="https://mystic.the-eye.eu/public/AI/cah/laion5b/embeddings/laion2B-en/laion2B-en-metadata/")
     # Hyperparameters
     parser.add_argument("--learning-rate", type=float, default=1.1e-4)
     parser.add_argument("--weight-decay", type=float, default=6.02e-2)
     parser.add_argument("--dropout", type=float, default=5e-2)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
-    parser.add_argument("--batch-size", type=int, default=10**4)
-    parser.add_argument("--num-epochs", type=int, default=5)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--num-epochs", type=int, default=1)
     # Image embed dimension
     parser.add_argument("--image-embed-dim", type=int, default=768)
     # Train-test split
@@ -283,24 +288,25 @@ def main():
     parser.add_argument("--train-percent", type=float, default=0.7)
     parser.add_argument("--val-percent", type=float, default=0.2)
     parser.add_argument("--test-percent", type=float, default=0.1)
-    # LAION training(pre-computed embeddings)
     # DiffusionPriorNetwork(dpn) parameters
-    parser.add_argument("--dpn-depth", type=int, default=6)
+    parser.add_argument("--dpn-depth", type=int, default=12)
     parser.add_argument("--dpn-dim-head", type=int, default=64)
-    parser.add_argument("--dpn-heads", type=int, default=8)
+    parser.add_argument("--dpn-heads", type=int, default=12)
     # DiffusionPrior(dp) parameters
-    parser.add_argument("--dp-condition-on-text-encodings", type=bool, default=False)
-    parser.add_argument("--dp-timesteps", type=int, default=100)
-    parser.add_argument("--dp-normformer", type=bool, default=False)
+    parser.add_argument("--dp-condition-on-text-encodings", type=bool, default=True)
+    parser.add_argument("--dp-timesteps", type=int, default=1000)
+    parser.add_argument("--dp-normformer", type=bool, default=True)
     parser.add_argument("--dp-cond-drop-prob", type=float, default=0.1)
     parser.add_argument("--dp-loss-type", type=str, default="l2")
     parser.add_argument("--clip-model", type=str, default="ViT-L/14")
     parser.add_argument("--amp", type=bool, default=False)
     # Model checkpointing interval(minutes)
-    parser.add_argument("--save-interval", type=int, default=30)
+    parser.add_argument("--save-interval", type=int, default=120)
     parser.add_argument("--save-path", type=str, default="./diffusion_prior_checkpoints")
     # Saved model path 
     parser.add_argument("--pretrained-model-path", type=str, default=None)
+    # GPU selection
+    parser.add_argument("--gpu-device", type=int, default=0)
 
     args = parser.parse_args()
 
@@ -337,7 +343,7 @@ def main():
 
     has_cuda = torch.cuda.is_available()
     if has_cuda:
-        device = torch.device("cuda:0")
+        device = torch.device(f"cuda:{args.gpu_device}")
         torch.cuda.set_device(device)
 
     # Training loop
