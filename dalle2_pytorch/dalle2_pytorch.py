@@ -198,7 +198,7 @@ def unnormalize_zero_to_one(normed_img):
 EmbeddedText = namedtuple('EmbedTextReturn', ['text_embed', 'text_encodings'])
 EmbeddedImage = namedtuple('EmbedImageReturn', ['image_embed', 'image_encodings'])
 
-class BaseClipAdapter(nn.Module):
+class BaseClipAdapter(nn.Module, object):
     def __init__(self, clip, **kwargs):
         super().__init__()
         self.clip = clip
@@ -449,6 +449,34 @@ class OpenClipAdapter(BaseClipAdapter):
         image = self.clip_normalize(image)
         image_embed = self.clip.encode_image(image)
         return EmbeddedImage(l2norm(image_embed.float()), None)
+
+class T5OpenClipAdapter(OpenClipAdapter):
+    """
+    Bridge the gap between T5 and CLIP
+    """
+
+    def __init__(self, t5_model="google/t5-v1_1-xl", clip_name="ViT-H-14", clip_pretrained="laion2B-s32B-b79K"):
+        super().__init__(clip_name, clip_pretrained)
+        from transformers import T5EncoderModel, logging
+        logging.set_verbosity_error() # silence the annoying warnings
+
+        # Load T5 tokenizer and model
+        self.t5_model = T5EncoderModel.from_pretrained(t5_model) # set to eval by default
+
+    def embed_text(self, input_ids, attn_mask):
+        """
+        Override the default embed_text method to use T5 to encode the text
+
+        Output the last layer of the text encoder.
+        """
+
+        # get the model output
+        output = self.t5_model(input_ids=input_ids, attention_mask=attn_mask, output_hidden_states=True)
+
+        text_embed = output.last_hidden_state.detach()
+
+        return EmbeddedText(text_embed=text_embed, text_encodings=None)
+
 
 # classifier free guidance functions
 
@@ -982,7 +1010,7 @@ class DiffusionPriorNetwork(nn.Module):
 
         self.to_text_embeds = nn.Sequential(
             nn.Linear(dim, dim * num_text_embeds) if num_text_embeds > 1 else nn.Identity(),
-            Rearrange('b (n d) -> b n d', n = num_text_embeds)
+            Rearrange('b (n d) -> b n d', n = num_text_embeds) if num_time_embeds > 1 else nn.Identity()
         )
 
         self.continuous_embedded_time = not exists(num_timesteps)
@@ -1166,7 +1194,9 @@ class DiffusionPrior(nn.Module):
         training_clamp_l2norm = False,
         init_image_embed_l2norm = False,
         image_embed_scale = None,            # this is for scaling the l2-normed image embedding, so it is more suitable for gaussian diffusion, as outlined by Katherine (@crowsonkb) https://github.com/lucidrains/DALLE2-pytorch/issues/60#issue-1226116132
-        clip_adapter_overrides = dict()
+        clip_adapter_overrides = dict(),
+        text_proj_in_dim = None,             # wether to project the input embeddings to a different dimension (e.g. 512 -> 256)
+        norm_text_proj = False,              # option to normalize the projection layers
     ):
         super().__init__()
 
@@ -1215,7 +1245,6 @@ class DiffusionPrior(nn.Module):
         # @crowsonkb 's suggestion - https://github.com/lucidrains/DALLE2-pytorch/issues/60#issue-1226116132
 
         self.image_embed_scale = default(image_embed_scale, self.image_embed_dim ** 0.5)
-
         # whether to force an l2norm, similar to clipping denoised, when sampling
 
         self.sampling_clamp_l2norm = sampling_clamp_l2norm
@@ -1223,6 +1252,11 @@ class DiffusionPrior(nn.Module):
 
         self.training_clamp_l2norm = training_clamp_l2norm
         self.init_image_embed_l2norm = init_image_embed_l2norm
+
+        # set the projection dimension
+
+        self.text_proj_in_dim = default(text_proj_in_dim, self.image_embed_dim)
+        self.text_projection = MLP(self.text_proj_in_dim, self.image_embed_dim, norm = norm_text_proj) if text_proj_in_dim else nn.Identity()
 
         # device tracker
 
@@ -1431,7 +1465,7 @@ class DiffusionPrior(nn.Module):
         image_embed_dim = self.image_embed_dim
 
         text_embed, text_encodings = self.clip.embed_text(text)
-
+        text_embed = self.text_projection(text_embed)
         text_cond = dict(text_embed = text_embed)
 
         if self.condition_on_text_encodings:
@@ -1476,6 +1510,9 @@ class DiffusionPrior(nn.Module):
         if exists(text):
             text_embed, text_encodings = self.clip.embed_text(text)
 
+        # project the image embedding to the same dimension as the text embedding
+
+        text_embed = self.text_projection(text_embed)
         text_cond = dict(text_embed = text_embed)
 
         if self.condition_on_text_encodings:
